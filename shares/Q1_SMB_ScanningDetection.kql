@@ -6,6 +6,7 @@
 
 DeviceNetworkEvents
 | where RemotePort == 445
+| where ActionType == "ConnectionSuccess"       // Completed connections only — removes failed/reset handshake noise
 | where Timestamp > ago(24h)
 // ---------------------------------------------------------
 // EXCLUSIONS: Processes with legitimate high-volume SMB activity
@@ -29,7 +30,8 @@ DeviceNetworkEvents
     InitiatingProcessFileName,
     InitiatingProcessCommandLine,
     InitiatingProcessId,
-    InitiatingProcessCreationTime
+    InitiatingProcessCreationTime,
+    InitiatingProcessParentFileName         // Exposes what launched the scanning process
 // Tuned threshold: above legitimate baseline of 18 (30-day analysis)
 | where RemoteIPCount > 20
 | order by RemoteIPCount desc

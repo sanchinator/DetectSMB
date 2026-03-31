@@ -1,0 +1,45 @@
+// ============================================================
+// Q3: SHARE ENUMERATION DETECTION VIA CLI
+// Purpose: Detect processes actively enumerating SMB shares
+//          using built-in Windows tools. No threshold —
+//          every instance is worth reviewing.
+// Table  : DeviceProcessEvents
+// ============================================================
+
+// Branch 1 — net.exe / net1.exe
+// Covers: net share, net view \\server, net use, net session
+DeviceProcessEvents
+| where Timestamp > ago(24h)
+| where FileName in~ ("net.exe", "net1.exe")
+| where ProcessCommandLine has_any ("share", "view", "use", "session")
+
+// Branch 2 — PowerShell SMB cmdlets
+| union (
+    DeviceProcessEvents
+    | where Timestamp > ago(24h)
+    | where FileName in~ ("powershell.exe", "pwsh.exe")
+    | where ProcessCommandLine has_any (
+        "Get-SmbShare",
+        "Get-SmbMapping",
+        "Get-SmbConnection",
+        "Get-WmiObject Win32_Share"
+    )
+)
+
+// Branch 3 — WMIC share enumeration
+| union (
+    DeviceProcessEvents
+    | where Timestamp > ago(24h)
+    | where FileName =~ "wmic.exe"
+    | where ProcessCommandLine has "share"
+)
+
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,          // What launched this — key for triage
+    InitiatingProcessCommandLine
+| order by Timestamp desc

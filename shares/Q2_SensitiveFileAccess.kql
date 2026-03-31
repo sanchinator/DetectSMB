@@ -35,7 +35,13 @@ DeviceFileEvents
     "web.config",                        // ASP.NET — often contains DB connection strings
     "appsettings",                       // .NET config — same risk as web.config
     "secrets.json",
-    "KeePass", ".kdbx", ".kdb"          // Password manager databases
+    "KeePass", ".kdbx", ".kdb",         // Password manager databases
+    // CI/CD and infrastructure config
+    ".yaml", ".yml",                    // Kubernetes secrets, Ansible vaults, CI/CD pipelines
+    ".config",                          // Broad .NET/app config catch
+    // Business-sensitive documents
+    "salary", "budget", "payroll", "financ",  // financ covers financial/finances/etc.
+    "hrdata", "personnel"               // HR records — relevant in healthcare environment
 )
 // ---------------------------------------------------------
 // FILTER 3: OR catch by dangerous extension alone
@@ -51,7 +57,9 @@ DeviceFileEvents
         ".p12",   // Same as .pfx, different extension convention
         ".ppk",   // PuTTY private key
         ".rdp",   // RDP files can embed credentials
-        ".ovpn"   // VPN config — may contain embedded certs/keys
+        ".ovpn",  // VPN config — may contain embedded certs/keys
+        ".sql",   // Database dump or schema files
+        ".bak"    // SQL Server backup files
     )
 )
 // ---------------------------------------------------------
