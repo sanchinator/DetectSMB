@@ -1,0 +1,35 @@
+// ============================================================
+// Q1 FINAL: SMB SCANNING / SHARE ENUMERATION DETECTION
+// Threshold: >20 unique remote IPs over SMB (port 445)
+// Baseline: 30-day analysis showed max 18 for legitimate tools
+// ============================================================
+
+DeviceNetworkEvents
+| where RemotePort == 445
+| where Timestamp > ago(24h)
+// ---------------------------------------------------------
+// EXCLUSIONS: Processes with legitimate high-volume SMB activity
+// Add new entries here as you identify false positives
+// ---------------------------------------------------------
+| where InitiatingProcessFileName !in~ (
+    "svchost.exe",      // Group Policy, DFS, WMI over SMB
+    "lsass.exe",        // NTLM/Kerberos authentication flows
+    "services.exe",     // Service Control Manager remote comms
+    "MsMpEng.exe"       // Defender real-time network path scanning
+)
+// Exclude kernel (PID 4) and Idle (PID 0)
+| where InitiatingProcessId !in (0, 4)
+| summarize
+    RemoteIPCount = dcount(RemoteIP),
+    RemoteIPs     = make_set(RemoteIP, 20),
+    FirstSeen     = min(Timestamp),
+    LastSeen      = max(Timestamp)
+    by
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    InitiatingProcessCreationTime
+// Tuned threshold: above legitimate baseline of 18 (30-day analysis)
+| where RemoteIPCount > 20
+| order by RemoteIPCount desc

@@ -1,0 +1,96 @@
+// ============================================================
+// Q2 FINAL: SENSITIVE FILE ACCESS ON NETWORK SHARES (UNC PATHS)
+// Purpose: Detect access to files with sensitive names or
+//          extensions on SMB shares (\\server\share\...).
+//          Catches credential files, keys, and config files
+//          that should never be on open shares.
+// Table:   DeviceFileEvents
+//          Logged whenever a file is read, created, modified,
+//          deleted, or renamed on an MDE-enrolled device.
+// Findings: KeePass.config.xml accessed by user 9091057
+//           (KeePass atomic save — config stores path to .kdbx)
+// ============================================================
+
+DeviceFileEvents
+| where Timestamp > ago(24h)
+// ---------------------------------------------------------
+// FILTER 1: UNC paths only
+// FolderPath starts with \\ = file lives on a network share,
+// not a local drive.
+// ---------------------------------------------------------
+| where FolderPath startswith @"\\"
+// ---------------------------------------------------------
+// FILTER 2: Sensitive file names
+// has_any() checks if the field contains ANY of these strings.
+// Case-insensitive by default in KQL string operators.
+// ---------------------------------------------------------
+| where FileName has_any (
+    // Credential-related names
+    "password", "passwd", "credential", "creds",
+    // Secret / key material
+    "secret", "apikey", "api_key", "token", "private_key",
+    // Well-known sensitive filenames
+    "id_rsa", "id_ed25519", "id_dsa",   // SSH private keys
+    ".env",                              // Environment variable files (DB passwords, API keys)
+    "web.config",                        // ASP.NET — often contains DB connection strings
+    "appsettings",                       // .NET config — same risk as web.config
+    "secrets.json",
+    "KeePass", ".kdbx", ".kdb"          // Password manager databases
+)
+// ---------------------------------------------------------
+// FILTER 3: OR catch by dangerous extension alone
+// Some files are sensitive purely by extension regardless of name.
+// ---------------------------------------------------------
+| union (
+    DeviceFileEvents
+    | where Timestamp > ago(24h)
+    | where FolderPath startswith @"\\"
+    | where FileName has_any (
+        ".pem",   // Certificate/key files
+        ".pfx",   // PKCS#12 — bundled cert + private key
+        ".p12",   // Same as .pfx, different extension convention
+        ".ppk",   // PuTTY private key
+        ".rdp",   // RDP files can embed credentials
+        ".ovpn"   // VPN config — may contain embedded certs/keys
+    )
+)
+// ---------------------------------------------------------
+// EXCLUSIONS: System processes with legitimate SMB activity
+// NOTE: lsass.exe is intentionally NOT excluded here —
+//       lsass reading a sensitive file on a share is a real signal.
+// ---------------------------------------------------------
+| where InitiatingProcessFileName !in~ (
+    "svchost.exe",
+    "services.exe",
+    "MsMpEng.exe",
+    // Veeam Backup — writes SSL .pem certificates during backup jobs.
+    // Generates thousands of FileCreated events for key.pem, cert.pem, etc.
+    // Completely legitimate backup software behavior.
+    "veeam.guest.interaction.proxy.exe",
+    "veeam.backup.manager.exe"
+)
+| where InitiatingProcessId !in (0, 4)
+// ---------------------------------------------------------
+// EXCLUSION: KeePass atomic save behavior
+// KeePass renames a temp file to KeePass.config.xml on every save
+// (same pattern used for .kdbx). This is normal application behavior.
+// KeePass.config.xml stores app settings + path to the .kdbx database.
+// We exclude FileRenamed only — FileRead/FileCreated remain visible.
+// FINDING: User 9091057 storing KeePass config on a network share.
+//          Config reveals path to password database — document and report.
+// ---------------------------------------------------------
+| where not (InitiatingProcessFileName =~ "keepass.exe"
+             and ActionType == "FileRenamed")
+// ---------------------------------------------------------
+// OUTPUT
+// ---------------------------------------------------------
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,                        // WHO accessed the file
+    FileName,                           // the sensitive file name
+    FolderPath,                         // full UNC path (\\server\share\...)
+    ActionType,                         // FileRead, FileCreated, FileModified, etc.
+    InitiatingProcessFileName,          // process that opened the file
+    InitiatingProcessCommandLine        // full command — reveals intent
+| order by Timestamp desc
